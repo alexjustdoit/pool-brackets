@@ -153,6 +153,7 @@ with st.sidebar:
         "Navigate",
         ["🏆 Tournaments", "🎱 Bracket", "📊 Stats", "📥 Import"],
         label_visibility="collapsed",
+        key="nav",
     )
     st.divider()
 
@@ -180,7 +181,12 @@ with st.sidebar:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def format_label(fmt: str) -> str:
-    return {"single_elim": "Single Elim", "double_elim": "Double Elim", "doubles": "Doubles"}.get(fmt, fmt)
+    return {
+        "singles_se": "Singles · Single Elim",
+        "singles_de": "Singles · Double Elim",
+        "doubles_se": "Doubles · Single Elim",
+        "doubles_de": "Doubles · Double Elim",
+    }.get(fmt, fmt)
 
 
 def status_pill(status: str) -> str:
@@ -196,25 +202,37 @@ def page_tournaments():
     with st.expander("➕ Create New Tournament", expanded=False):
         with st.form("create_tournament_form"):
             t_name = st.text_input("Tournament name", placeholder="e.g. April Singles Night")
-            t_format = st.selectbox(
-                "Format",
-                ["double_elim", "single_elim", "doubles"],
-                format_func=format_label,
-            )
+            col_mt, col_bt = st.columns(2)
+            with col_mt:
+                match_type = st.radio(
+                    "Match type",
+                    ["Singles (1v1)", "Doubles (2v2)"],
+                    help="Singles = individual players. Doubles = teams of 2.",
+                )
+            with col_bt:
+                bracket_type = st.radio(
+                    "Bracket format",
+                    ["Double Elimination", "Single Elimination"],
+                    help="Double Elim: one loss drops you to a second-chance bracket. Single Elim: one loss and you're out.",
+                )
             gf_reset = st.toggle(
                 "Grand Final reset match",
                 value=True,
-                help="If the Losers Bracket champion beats the Winners Bracket champion, play a 2nd match. Default ON.",
-                disabled=(t_format == "single_elim"),
+                help="Double Elim only: if the Losers Bracket champion wins the Grand Final, play a 2nd deciding match.",
             )
             submitted = st.form_submit_button("Create Tournament", type="primary")
             if submitted:
                 if not t_name.strip():
                     st.error("Enter a tournament name.")
                 else:
-                    t = create_tournament(sb, t_name.strip(), t_format, gf_reset if t_format != "single_elim" else False)
+                    is_doubles = "Doubles" in match_type
+                    is_de = "Double" in bracket_type
+                    fmt = ("doubles" if is_doubles else "singles") + ("_de" if is_de else "_se")
+                    use_reset = gf_reset and is_de
+                    t = create_tournament(sb, t_name.strip(), fmt, use_reset)
                     st.session_state.selected_tournament_id = t["id"]
-                    st.success(f"Created: **{t_name}**. Head to the Bracket page to add players.")
+                    st.session_state.nav = "🎱 Bracket"
+                    st.success(f"Created **{t_name}**.")
                     st.rerun()
 
     st.divider()
@@ -236,6 +254,7 @@ def page_tournaments():
         with col3:
             if st.button("Open →", key=f"open_{t['id']}"):
                 st.session_state.selected_tournament_id = t["id"]
+                st.session_state.nav = "🎱 Bracket"
                 st.rerun()
         st.divider()
 
@@ -668,12 +687,17 @@ def page_stats():
 
     # Format stats
     st.markdown('<div class="section-header">By Format</div>', unsafe_allow_html=True)
-    fc1, fc2, fc3 = st.columns(3)
+    fc1, fc2, fc3, fc4 = st.columns(4)
     for col, (fmt, label) in zip(
-        [fc1, fc2, fc3],
-        [("single_elim", "Single Elim"), ("double_elim", "Double Elim"), ("doubles", "Doubles")]
+        [fc1, fc2, fc3, fc4],
+        [
+            ("singles_se", "Singles SE"),
+            ("singles_de", "Singles DE"),
+            ("doubles_se", "Doubles SE"),
+            ("doubles_de", "Doubles DE"),
+        ]
     ):
-        fs = stats["format_stats"][fmt]
+        fs = stats["format_stats"].get(fmt, {"played": 0, "won": 0})
         col.metric(label, f"{fs['won']}W / {fs['played']}P" if fs["played"] else "—")
 
 

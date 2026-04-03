@@ -12,7 +12,7 @@ CREATE TABLE players (
 CREATE TABLE tournaments (
     id                  UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     name                TEXT NOT NULL,
-    format              TEXT NOT NULL CHECK (format IN ('single_elim', 'double_elim', 'doubles')),
+    format              TEXT NOT NULL CHECK (format IN ('singles_se', 'singles_de', 'doubles_se', 'doubles_de')),
     status              TEXT NOT NULL DEFAULT 'setup' CHECK (status IN ('setup', 'active', 'completed')),
     gf_reset_enabled    BOOLEAN DEFAULT TRUE,
     gf_reset_used       BOOLEAN DEFAULT FALSE,

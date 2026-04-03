@@ -142,14 +142,15 @@ def get_player_stats(sb: Client, player_id: str) -> dict:
 
     # Format stats
     format_stats: dict = {
-        "single_elim": {"played": 0, "won": 0},
-        "double_elim": {"played": 0, "won": 0},
-        "doubles": {"played": 0, "won": 0},
+        "singles_se": {"played": 0, "won": 0},
+        "singles_de": {"played": 0, "won": 0},
+        "doubles_se": {"played": 0, "won": 0},
+        "doubles_de": {"played": 0, "won": 0},
     }
     for c in comp_rows:
-        fmt = (c.get("tournaments") or {}).get("format", "single_elim")
+        fmt = (c.get("tournaments") or {}).get("format", "singles_se")
         if fmt not in format_stats:
-            fmt = "single_elim"
+            fmt = "singles_se"
         format_stats[fmt]["played"] += 1
         if c["bracket_status"] == "champion":
             format_stats[fmt]["won"] += 1
@@ -268,8 +269,9 @@ def _empty_stats() -> dict:
         "stage_breakdown": {},
         "recent_form": [],
         "format_stats": {
-            "single_elim": {"played": 0, "won": 0},
-            "double_elim": {"played": 0, "won": 0},
-            "doubles": {"played": 0, "won": 0},
+            "singles_se": {"played": 0, "won": 0},
+            "singles_de": {"played": 0, "won": 0},
+            "doubles_se": {"played": 0, "won": 0},
+            "doubles_de": {"played": 0, "won": 0},
         },
     }

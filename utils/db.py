@@ -132,7 +132,7 @@ def check_doubles_eligibility(sb: Client, player_id: str) -> bool:
     cutoff = datetime.now(timezone.utc) - timedelta(days=365)
     for row in rows:
         t = row.get("tournaments", {})
-        if t.get("format") in ("single_elim", "double_elim"):
+        if t.get("format") in ("singles_se", "singles_de"):
             completed = t.get("completed_at")
             if completed:
                 try:
@@ -167,9 +167,9 @@ def start_tournament(sb: Client, tournament_id: str) -> None:
     for i, comp in enumerate(competitors):
         sb.table("tournament_competitors").update({"seed": i + 1}).eq("id", comp["id"]).execute()
 
-    # Determine bracket type (doubles uses same bracket logic as single/double_elim)
+    # Determine bracket type from format string
     fmt = tournament["format"]
-    bracket_format = "single_elim" if fmt == "single_elim" else "double_elim"
+    bracket_format = "single_elim" if fmt.endswith("_se") else "double_elim"
 
     match_specs = generate_bracket(n, bracket_format)
 
