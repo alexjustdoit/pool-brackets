@@ -132,7 +132,7 @@ sb = _get_sb()
 def _init_state():
     defaults = {
         "selected_tournament_id": None,
-        "page": "Tournaments",
+        "pending_nav": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -140,6 +140,11 @@ def _init_state():
 
 
 _init_state()
+
+# Apply any pending navigation before widgets render
+if st.session_state.pending_nav:
+    st.session_state.nav = st.session_state.pending_nav
+    st.session_state.pending_nav = None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -231,7 +236,7 @@ def page_tournaments():
                     use_reset = gf_reset and is_de
                     t = create_tournament(sb, t_name.strip(), fmt, use_reset)
                     st.session_state.selected_tournament_id = t["id"]
-                    st.session_state.nav = "🎱 Bracket"
+                    st.session_state.pending_nav = "🎱 Bracket"
                     st.success(f"Created **{t_name}**.")
                     st.rerun()
 
@@ -254,7 +259,7 @@ def page_tournaments():
         with col3:
             if st.button("Open →", key=f"open_{t['id']}"):
                 st.session_state.selected_tournament_id = t["id"]
-                st.session_state.nav = "🎱 Bracket"
+                st.session_state.pending_nav = "🎱 Bracket"
                 st.rerun()
         st.divider()
 
