@@ -392,11 +392,13 @@ def _tournament_setup(t: dict):
             st.caption(f"{n} entrant{'s' if n != 1 else ''}{gf_note} · seeding is random")
 
             if st.button("Start Tournament →", type="primary"):
-                try:
-                    start_tournament(sb, tournament_id)
-                    st.rerun()
-                except Exception as e:
-                    st.error(str(e))
+                with st.spinner("Generating bracket…"):
+                    try:
+                        start_tournament(sb, tournament_id)
+                    except Exception as e:
+                        st.error(str(e))
+                        st.stop()
+                st.rerun()
     else:
         st.info("Add players above to get started.")
 

@@ -219,25 +219,23 @@ _GAP_R1 = 10    # px between round-1 matches
 _COL_GAP = 0    # connector already handles spacing
 
 
-def _match_positions(n_r1: int, n_rounds: int) -> dict[int, list[float]]:
+def _match_positions(round_sizes: list[int]) -> dict[int, list[float]]:
     """
     Compute top-edge pixel position for each match in each round (0-indexed).
-    Returns {round_index: [top_px, top_px, ...]}.
+    Uses the actual per-round match counts (safe for LB injection rounds that
+    don't follow a simple halving pattern).
+
+    Each match is centred in an equal-height slot within the total bracket height.
+    Returns {round_index: [top_px, ...]}.
     """
     H, G = _MATCH_H, _GAP_R1
+    n_r1 = round_sizes[0]
+    total_h = n_r1 * (H + G) - G  # height of the first-round column
+
     pos: dict[int, list[float]] = {}
-    for r in range(n_rounds):
-        n = n_r1 // (2 ** r)
-        col = []
-        for i in range(n):
-            if r == 0:
-                top = i * (H + G)
-            else:
-                p = pos[r - 1]
-                center = (p[2 * i] + H / 2 + p[2 * i + 1] + H / 2) / 2
-                top = center - H / 2
-            col.append(top)
-        pos[r] = col
+    for r, n in enumerate(round_sizes):
+        slot_h = total_h / n
+        pos[r] = [i * slot_h + (slot_h - H) / 2 for i in range(n)]
     return pos
 
 
@@ -375,11 +373,11 @@ def render_bracket_html(
     def render_section(label: str, rounds: list[list[dict]]) -> str:
         if not rounds:
             return ""
-        n_r1 = len(rounds[0])
+        round_sizes = [len(r) for r in rounds]
+        n_r1 = round_sizes[0]
         n_rounds = len(rounds)
-        pos = _match_positions(n_r1, n_rounds)
-        # total height of the first-round column
-        total_h = n_r1 * _MATCH_H + max(0, n_r1 - 1) * _GAP_R1 + _MATCH_H  # extra pad
+        pos = _match_positions(round_sizes)
+        total_h = n_r1 * (_MATCH_H + _GAP_R1) - _GAP_R1 + _MATCH_H  # extra pad
 
         out = f'<div class="pb-section-label">{label}</div>'
         out += '<div class="pb-rounds">'
