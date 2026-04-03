@@ -24,6 +24,7 @@ from utils.db import (
     get_bracket_data,
     organize_bracket_for_render,
     record_result,
+    change_result,
     import_historical,
 )
 from utils.bracket import render_bracket_html
@@ -155,6 +156,7 @@ def _init():
     for k, v in {
         "view": "home",          # home | tournament | stats | import
         "tournament_id": None,
+        "editing_match": None,   # match_id being corrected
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -485,6 +487,12 @@ def _render_roster(competitors: list[dict], tournament_id: str, allow_remove: bo
 
 # ── Active ────────────────────────────────────────────────────────────────────
 
+def _match_label(m: dict) -> str:
+    b = {"winners": "WB", "losers": "LB", "grand_final": "Grand Final"}.get(m["bracket"], "")
+    r = "Reset" if m["gf_is_reset"] else f"R{m['round_number']}"
+    return f"{b} {r}"
+
+
 def _tournament_active(t: dict):
     tournament_id = t["id"]
     data = get_bracket_data(sb, tournament_id)
@@ -496,31 +504,69 @@ def _tournament_active(t: dict):
     if ready:
         st.markdown('<div class="sh">Ready to Play</div>', unsafe_allow_html=True)
         for m in ready:
-            c1 = competitors.get(m["competitor1_id"] or "")
-            c2 = competitors.get(m["competitor2_id"] or "")
-            n1 = c1["display_name"] if c1 else "TBD"
-            n2 = c2["display_name"] if c2 else "TBD"
-            b_label = {"winners": "WB", "losers": "LB", "grand_final": "Grand Final"}.get(m["bracket"], "")
-            r_label = "Reset" if m["gf_is_reset"] else f"R{m['round_number']}"
-
-            st.markdown(
-                f'<div class="match-entry">'
-                f'<div class="match-entry-label">{b_label} {r_label}</div>'
-                f'<strong>{n1}</strong> vs <strong>{n2}</strong>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-            btn1, btn2 = st.columns(2)
-            with btn1:
-                if c1 and st.button(f"🏆 {n1}", key=f"w_{m['id']}_1", use_container_width=True):
-                    record_result(sb, m["id"], m["competitor1_id"])
-                    st.rerun()
-            with btn2:
-                if c2 and st.button(f"🏆 {n2}", key=f"w_{m['id']}_2", use_container_width=True):
-                    record_result(sb, m["id"], m["competitor2_id"])
-                    st.rerun()
+            _render_match_entry(m, competitors, record_fn=lambda mid, wid: record_result(sb, mid, wid))
     else:
         st.info("No matches ready right now.")
+
+    # ── Recent results (tapable to correct) ──────────────────────────────────
+    completed = [
+        m for m in sorted(matches, key=lambda x: x["match_number"], reverse=True)
+        if m["status"] == "completed" and not m["is_bye"]
+    ][:5]
+
+    if completed:
+        st.markdown('<div class="sh">Recent Results  ·  tap to change</div>', unsafe_allow_html=True)
+        editing = st.session_state.editing_match
+
+        for m in completed:
+            c1  = competitors.get(m["competitor1_id"] or "")
+            c2  = competitors.get(m["competitor2_id"] or "")
+            w   = competitors.get(m["winner_id"] or "")
+            n1  = c1["display_name"] if c1 else "?"
+            n2  = c2["display_name"] if c2 else "?"
+            wn  = w["display_name"] if w else "?"
+
+            if editing == m["id"]:
+                # Show as editable
+                st.markdown(
+                    f'<div class="match-entry">'
+                    f'<div class="match-entry-label">{_match_label(m)}  ·  changing result</div>'
+                    f'<strong>{n1}</strong> vs <strong>{n2}</strong>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                btn1, btn2, btn3 = st.columns([2, 2, 1])
+                with btn1:
+                    if c1 and st.button(f"🏆 {n1}", key=f"chg_{m['id']}_1", use_container_width=True):
+                        try:
+                            change_result(sb, m["id"], m["competitor1_id"])
+                        except ValueError as e:
+                            st.error(str(e))
+                        st.session_state.editing_match = None
+                        st.rerun()
+                with btn2:
+                    if c2 and st.button(f"🏆 {n2}", key=f"chg_{m['id']}_2", use_container_width=True):
+                        try:
+                            change_result(sb, m["id"], m["competitor2_id"])
+                        except ValueError as e:
+                            st.error(str(e))
+                        st.session_state.editing_match = None
+                        st.rerun()
+                with btn3:
+                    if st.button("✕", key=f"chg_cancel_{m['id']}", use_container_width=True):
+                        st.session_state.editing_match = None
+                        st.rerun()
+            else:
+                col1, col2 = st.columns([5, 1])
+                with col1:
+                    st.markdown(
+                        f'<span style="color:#6B7280;font-size:12px">{_match_label(m)}</span>  '
+                        f'{n1} vs {n2}  →  **{wn}**'
+                    )
+                with col2:
+                    if st.button("✏️", key=f"edit_{m['id']}", use_container_width=True, help="Change result"):
+                        st.session_state.editing_match = m["id"]
+                        st.rerun()
 
     # ── Bracket visualization ────────────────────────────────────────────────
     st.markdown('<div class="sh">Bracket</div>', unsafe_allow_html=True)
@@ -533,6 +579,31 @@ def _tournament_active(t: dict):
     # ── Roster / payment ────────────────────────────────────────────────────
     with st.expander("💰 Payment Status", expanded=False):
         _render_roster(list(competitors.values()), tournament_id, allow_remove=False)
+
+
+def _render_match_entry(m: dict, competitors: dict, record_fn):
+    """Render a single ready-to-play match with winner buttons."""
+    c1 = competitors.get(m["competitor1_id"] or "")
+    c2 = competitors.get(m["competitor2_id"] or "")
+    n1 = c1["display_name"] if c1 else "TBD"
+    n2 = c2["display_name"] if c2 else "TBD"
+
+    st.markdown(
+        f'<div class="match-entry">'
+        f'<div class="match-entry-label">{_match_label(m)}</div>'
+        f'<strong>{n1}</strong> vs <strong>{n2}</strong>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    btn1, btn2 = st.columns(2)
+    with btn1:
+        if c1 and st.button(f"🏆 {n1}", key=f"w_{m['id']}_1", use_container_width=True):
+            record_fn(m["id"], m["competitor1_id"])
+            st.rerun()
+    with btn2:
+        if c2 and st.button(f"🏆 {n2}", key=f"w_{m['id']}_2", use_container_width=True):
+            record_fn(m["id"], m["competitor2_id"])
+            st.rerun()
 
 
 # ── Completed ─────────────────────────────────────────────────────────────────

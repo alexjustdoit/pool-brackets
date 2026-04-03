@@ -477,6 +477,103 @@ def _finish_tournament(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Changing a recorded result
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _get_match(sb: Client, match_id: str) -> dict | None:
+    rows = sb.table("matches").select("*").eq("id", match_id).execute().data
+    return rows[0] if rows else None
+
+
+def change_result(sb: Client, match_id: str, new_winner_id: str) -> None:
+    """
+    Change the result of a completed match.
+
+    Only allowed if no downstream match (the winner's next or the loser's next)
+    has already been completed — otherwise the bracket has moved on too far to
+    safely rewind.
+
+    Steps:
+      1. Validate downstream matches are still open.
+      2. Clear the old winner / loser from their downstream slots.
+      3. Reset bracket_status on both competitors.
+      4. Delete any GF reset match that was created as a consequence.
+      5. Un-complete the match and call record_result() with the new winner.
+    """
+    match = _get_match(sb, match_id)
+    if not match or match["status"] != "completed":
+        raise ValueError("Match is not completed.")
+
+    old_winner_id = match["winner_id"]
+    if old_winner_id == new_winner_id:
+        return  # nothing to do
+
+    c1, c2 = match["competitor1_id"], match["competitor2_id"]
+    old_loser_id = c2 if old_winner_id == c1 else c1
+
+    # ── Guard: downstream matches must not be completed ──────────────────────
+    for next_id in [match["winner_next_match_id"], match["loser_next_match_id"]]:
+        if not next_id:
+            continue
+        nxt = _get_match(sb, next_id)
+        if nxt and nxt["status"] == "completed":
+            raise ValueError(
+                "Can't change this result — a later match has already been played. "
+                "Change that result first."
+            )
+
+    # ── Remove old winner from their next match slot ─────────────────────────
+    if match["winner_next_match_id"]:
+        slot = match["winner_next_slot"]
+        sb.table("matches").update({
+            f"competitor{slot}_id": None,
+            "status": "pending",
+        }).eq("id", match["winner_next_match_id"]).execute()
+        _maybe_activate(sb, match["winner_next_match_id"])
+
+    # ── Remove old loser from their next match slot ──────────────────────────
+    if match["loser_next_match_id"]:
+        slot = match["loser_next_slot"]
+        sb.table("matches").update({
+            f"competitor{slot}_id": None,
+        }).eq("id", match["loser_next_match_id"]).execute()
+        _maybe_activate(sb, match["loser_next_match_id"])
+
+    # ── Reset competitor bracket statuses ────────────────────────────────────
+    if old_winner_id:
+        # Old winner was either WB player or LB player — put them back
+        prior_status = "losers" if match["bracket"] == "losers" else "winners"
+        sb.table("tournament_competitors").update({
+            "bracket_status": prior_status,
+        }).eq("id", old_winner_id).execute()
+    if old_loser_id:
+        prior_status = "losers" if match["bracket"] == "losers" else "winners"
+        sb.table("tournament_competitors").update({
+            "bracket_status": prior_status,
+        }).eq("id", old_loser_id).execute()
+
+    # ── GF-specific cleanup ──────────────────────────────────────────────────
+    if match["bracket"] == "grand_final":
+        # Delete any reset match that was spun up from this result
+        sb.table("matches").delete().eq(
+            "tournament_id", match["tournament_id"]
+        ).eq("gf_is_reset", True).execute()
+        _update_tournament(sb, match["tournament_id"], {
+            "gf_reset_used": False,
+            "status": "active",
+            "completed_at": None,
+        })
+
+    # ── Reset the match itself and re-record ─────────────────────────────────
+    sb.table("matches").update({
+        "winner_id": None,
+        "status": "ready",
+    }).eq("id", match_id).execute()
+
+    record_result(sb, match_id, new_winner_id)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Bracket read queries
 # ──────────────────────────────────────────────────────────────────────────────
 
