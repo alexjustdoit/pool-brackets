@@ -154,9 +154,10 @@ sb = _sb()
 
 def _init():
     for k, v in {
-        "view": "home",          # home | tournament | stats | import
+        "view": "home",           # home | tournament | stats | import
         "tournament_id": None,
-        "editing_match": None,   # match_id being corrected
+        "editing_match": None,    # match_id being corrected
+        "selected_match_id": None,  # ready match tapped in bracket
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -501,111 +502,197 @@ def _tournament_active(t: dict):
     matches     = data["matches"]
     competitors = data["competitors"]
     ready       = data["ready_matches"]
+    ready_ids   = {m["id"] for m in ready}
 
-    # ── Ready matches — primary action area ─────────────────────────────────
-    if ready:
-        st.markdown('<div class="sh">Ready to Play</div>', unsafe_allow_html=True)
-        for m in ready:
-            _render_match_entry(m, competitors, record_fn=lambda mid, wid: record_result(sb, mid, wid))
-    else:
-        st.info("No matches ready right now.")
+    # ── Interactive bracket (primary action surface) ──────────────────────
+    sections = organize_bracket_for_render(matches)
+    _render_bracket_native(sections, competitors, ready_ids)
 
-    # ── Recent results (tapable to correct) ──────────────────────────────────
+    # ── Recent results (corrections) ─────────────────────────────────────
     completed = [
         m for m in sorted(matches, key=lambda x: x["match_number"], reverse=True)
         if m["status"] == "completed" and not m["is_bye"]
     ][:5]
 
     if completed:
-        st.markdown('<div class="sh">Recent Results  ·  tap to change</div>', unsafe_allow_html=True)
-        editing = st.session_state.editing_match
+        with st.expander("✏️ Correct a result", expanded=False):
+            editing = st.session_state.editing_match
+            for m in completed:
+                c1  = competitors.get(m["competitor1_id"] or "")
+                c2  = competitors.get(m["competitor2_id"] or "")
+                w   = competitors.get(m["winner_id"] or "")
+                n1  = c1["display_name"] if c1 else "?"
+                n2  = c2["display_name"] if c2 else "?"
+                wn  = w["display_name"] if w else "?"
 
-        for m in completed:
-            c1  = competitors.get(m["competitor1_id"] or "")
-            c2  = competitors.get(m["competitor2_id"] or "")
-            w   = competitors.get(m["winner_id"] or "")
-            n1  = c1["display_name"] if c1 else "?"
-            n2  = c2["display_name"] if c2 else "?"
-            wn  = w["display_name"] if w else "?"
-
-            if editing == m["id"]:
-                # Show as editable
-                st.markdown(
-                    f'<div class="match-entry">'
-                    f'<div class="match-entry-label">{_match_label(m)}  ·  changing result</div>'
-                    f'<strong>{n1}</strong> vs <strong>{n2}</strong>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-                btn1, btn2, btn3 = st.columns([2, 2, 1])
-                with btn1:
-                    if c1 and st.button(f"🏆 {n1}", key=f"chg_{m['id']}_1", use_container_width=True):
-                        try:
-                            change_result(sb, m["id"], m["competitor1_id"])
-                        except ValueError as e:
-                            st.error(str(e))
-                        st.session_state.editing_match = None
-                        st.rerun()
-                with btn2:
-                    if c2 and st.button(f"🏆 {n2}", key=f"chg_{m['id']}_2", use_container_width=True):
-                        try:
-                            change_result(sb, m["id"], m["competitor2_id"])
-                        except ValueError as e:
-                            st.error(str(e))
-                        st.session_state.editing_match = None
-                        st.rerun()
-                with btn3:
-                    if st.button("✕", key=f"chg_cancel_{m['id']}", use_container_width=True):
-                        st.session_state.editing_match = None
-                        st.rerun()
-            else:
-                col1, col2 = st.columns([5, 1])
-                with col1:
+                if editing == m["id"]:
                     st.markdown(
-                        f'<span style="color:#6B7280;font-size:12px">{_match_label(m)}</span>  '
-                        f'{n1} vs {n2}  →  **{wn}**'
+                        f'<div class="match-entry">'
+                        f'<div class="match-entry-label">{_match_label(m)}  ·  changing result</div>'
+                        f'<strong>{n1}</strong> vs <strong>{n2}</strong>'
+                        f'</div>',
+                        unsafe_allow_html=True,
                     )
-                with col2:
-                    if st.button("✏️", key=f"edit_{m['id']}", use_container_width=True, help="Change result"):
-                        st.session_state.editing_match = m["id"]
-                        st.rerun()
+                    btn1, btn2, btn3 = st.columns([2, 2, 1])
+                    with btn1:
+                        if c1 and st.button(f"🏆 {n1}", key=f"chg_{m['id']}_1", use_container_width=True):
+                            try:
+                                change_result(sb, m["id"], m["competitor1_id"])
+                            except ValueError as e:
+                                st.error(str(e))
+                            st.session_state.editing_match = None
+                            st.rerun()
+                    with btn2:
+                        if c2 and st.button(f"🏆 {n2}", key=f"chg_{m['id']}_2", use_container_width=True):
+                            try:
+                                change_result(sb, m["id"], m["competitor2_id"])
+                            except ValueError as e:
+                                st.error(str(e))
+                            st.session_state.editing_match = None
+                            st.rerun()
+                    with btn3:
+                        if st.button("✕", key=f"chg_cancel_{m['id']}", use_container_width=True):
+                            st.session_state.editing_match = None
+                            st.rerun()
+                else:
+                    col1, col2 = st.columns([5, 1])
+                    with col1:
+                        st.markdown(
+                            f'<span style="color:#6B7280;font-size:12px">{_match_label(m)}</span>  '
+                            f'{n1} vs {n2}  →  **{wn}**'
+                        )
+                    with col2:
+                        if st.button("✏️", key=f"edit_{m['id']}", use_container_width=True, help="Change result"):
+                            st.session_state.editing_match = m["id"]
+                            st.rerun()
 
-    # ── Bracket visualization ────────────────────────────────────────────────
-    st.markdown('<div class="sh">Bracket</div>', unsafe_allow_html=True)
-    sections = organize_bracket_for_render(matches)
-    display_comps = {cid: {"display_name": c["display_name"], "paid": c["paid"]}
-                     for cid, c in competitors.items()}
-    bracket_html = render_bracket_html(sections, display_comps)
-    st.components.v1.html(bracket_html, height=_bracket_height(matches), scrolling=True)
-
-    # ── Roster / payment ────────────────────────────────────────────────────
+    # ── Payment status ────────────────────────────────────────────────────
     with st.expander("💰 Payment Status", expanded=False):
         _render_roster(list(competitors.values()), tournament_id, allow_remove=False)
 
 
-def _render_match_entry(m: dict, competitors: dict, record_fn):
-    """Render a single ready-to-play match with winner buttons."""
-    c1 = competitors.get(m["competitor1_id"] or "")
-    c2 = competitors.get(m["competitor2_id"] or "")
-    n1 = c1["display_name"] if c1 else "TBD"
-    n2 = c2["display_name"] if c2 else "TBD"
+def _render_bracket_native(sections: dict, competitors: dict, ready_ids: set):
+    """
+    Render the bracket using native Streamlit columns.
+    Ready matches are tappable — clicking expands them inline to select a winner.
+    """
+    selected_id = st.session_state.get("selected_match_id")
 
-    st.markdown(
-        f'<div class="match-entry">'
-        f'<div class="match-entry-label">{_match_label(m)}</div>'
-        f'<strong>{n1}</strong> vs <strong>{n2}</strong>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-    btn1, btn2 = st.columns(2)
-    with btn1:
-        if c1 and st.button(f"🏆 {n1}", key=f"w_{m['id']}_1", use_container_width=True):
-            record_fn(m["id"], m["competitor1_id"])
+    if not ready_ids:
+        st.info("No matches ready right now.")
+
+    section_configs = [
+        ("winners", "Winners Bracket",
+         lambda r, tot: "Final" if r == tot - 1 else "Semis" if r == tot - 2 else f"R{r + 1}"),
+        ("losers",  "Losers Bracket",
+         lambda r, tot: f"LB R{r + 1}"),
+        ("grand_final", "Grand Final",
+         lambda r, tot: "GF" if r == 0 else "GF Reset"),
+    ]
+
+    for sec_key, sec_label, lbl_fn in section_configs:
+        rounds = sections.get(sec_key, [])
+        if not rounds or not any(rounds):
+            continue
+
+        st.markdown(f'<div class="sh">{sec_label}</div>', unsafe_allow_html=True)
+
+        n_rounds = len(rounds)
+        cols = st.columns(n_rounds)
+
+        for r_idx, (col, round_matches) in enumerate(zip(cols, rounds)):
+            with col:
+                st.caption(lbl_fn(r_idx, n_rounds))
+                for match in round_matches:
+                    if match.get("is_bye"):
+                        continue
+                    _render_match_card_native(match, competitors, ready_ids, selected_id)
+
+
+def _render_match_card_native(
+    match: dict,
+    competitors: dict,
+    ready_ids: set,
+    selected_id: str | None,
+):
+    """Render one match card. Ready matches are interactive."""
+    mid   = match["id"]
+    c1_id = match.get("competitor1_id")
+    c2_id = match.get("competitor2_id")
+    c1    = competitors.get(c1_id or "")
+    c2    = competitors.get(c2_id or "")
+    n1    = c1["display_name"] if c1 else "TBD"
+    n2    = c2["display_name"] if c2 else "TBD"
+    w_id  = match.get("winner_id")
+    status    = match.get("status", "pending")
+    is_ready  = mid in ready_ids
+    is_sel    = mid == selected_id
+
+    if is_ready and is_sel:
+        # Expanded: show winner buttons inline
+        st.markdown(
+            f'<div style="border:1.5px solid #F59E0B;border-radius:6px;padding:8px 10px;'
+            f'margin-bottom:4px;background:#1F2937;">'
+            f'<div style="font-size:10px;color:#F59E0B;font-weight:700;">'
+            f'{_match_label(match)} · who won?</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        if c1 and st.button(f"🏆 {n1}", key=f"win_{mid}_1", use_container_width=True):
+            record_result(sb, mid, c1_id)
+            st.session_state.selected_match_id = None
             st.rerun()
-    with btn2:
-        if c2 and st.button(f"🏆 {n2}", key=f"w_{m['id']}_2", use_container_width=True):
-            record_fn(m["id"], m["competitor2_id"])
+        if c2 and st.button(f"🏆 {n2}", key=f"win_{mid}_2", use_container_width=True):
+            record_result(sb, mid, c2_id)
+            st.session_state.selected_match_id = None
             st.rerun()
+        if st.button("✕", key=f"cancel_{mid}", use_container_width=True):
+            st.session_state.selected_match_id = None
+            st.rerun()
+
+    elif is_ready:
+        # Ready but not yet tapped — highlighted, tappable
+        st.markdown(
+            f'<div style="border:1.5px solid #F59E0B;box-shadow:0 0 0 2px rgba(245,158,11,.15);'
+            f'border-radius:6px;padding:6px 10px;margin-bottom:2px;background:#1F2937;">'
+            f'<div style="font-size:10px;color:#F59E0B;font-weight:700;margin-bottom:3px;">'
+            f'{_match_label(match)}</div>'
+            f'<div style="color:#F9FAFB;font-size:13px;">{n1}</div>'
+            f'<div style="color:#F9FAFB;font-size:13px;border-top:1px solid #374151;'
+            f'margin-top:3px;padding-top:3px;">{n2}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("Tap to enter result", key=f"sel_{mid}", use_container_width=True):
+            st.session_state.selected_match_id = mid
+            st.rerun()
+
+    elif status == "completed":
+        p1_color  = "#4ADE80" if c1_id == w_id else "#6B7280"
+        p2_color  = "#4ADE80" if c2_id == w_id else "#6B7280"
+        p1_weight = "700" if c1_id == w_id else "400"
+        p2_weight = "700" if c2_id == w_id else "400"
+        st.markdown(
+            f'<div style="border:1px solid #374151;border-radius:6px;padding:6px 10px;'
+            f'margin-bottom:6px;background:#1F2937;opacity:0.75;">'
+            f'<div style="color:{p1_color};font-weight:{p1_weight};font-size:13px;">{n1}</div>'
+            f'<div style="color:{p2_color};font-weight:{p2_weight};font-size:13px;'
+            f'border-top:1px solid #2D3748;margin-top:3px;padding-top:3px;">{n2}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    else:
+        # Pending — both slots TBD
+        st.markdown(
+            f'<div style="border:1px solid #1F2937;border-radius:6px;padding:6px 10px;'
+            f'margin-bottom:6px;background:#111827;">'
+            f'<div style="color:#374151;font-size:13px;">TBD</div>'
+            f'<div style="color:#374151;font-size:13px;border-top:1px solid #1D2533;'
+            f'margin-top:3px;padding-top:3px;">TBD</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
 
 # ── Completed ─────────────────────────────────────────────────────────────────
