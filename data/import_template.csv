@@ -1,0 +1,7 @@
+date,tournament_name,format,player_name,placement,paid
+2024-01-15,January Singles,single_elim,Alex G,1,true
+2024-01-15,January Singles,single_elim,Sam T,2,false
+2024-01-15,January Singles,single_elim,Jordan B,3,true
+2024-01-15,January Singles,single_elim,Chris M,3,true
+2024-02-19,February Doubles,doubles,Alex G / Sam T,1,true
+2024-02-19,February Doubles,doubles,Jordan B / Chris M,2,false
